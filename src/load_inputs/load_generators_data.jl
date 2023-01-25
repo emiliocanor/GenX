@@ -77,7 +77,6 @@ function load_generators_data!(setup::Dict, path::AbstractString, inputs_gen::Di
 
 	# Add Resource IDs after reading to prevent user errors
 	gen_in[!,:R_ID] = 1:length(collect(skipmissing(gen_in[!,1])))
-
 	# Store DataFrame of generators/resources input data for use in model
 	inputs_gen["dfGen"] = gen_in
 

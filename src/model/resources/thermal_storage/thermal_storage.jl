@@ -36,6 +36,7 @@ end
 function get_resistive_heating(inputs::Dict)::Vector{Int}
 	dfTS = inputs["dfTS"]
 	dfTS[dfTS.RH.==1,:R_ID]
+end
 
 function get_maintenance(inputs::Dict)::Vector{Int}
 	dfTS = inputs["dfTS"]
@@ -121,8 +122,10 @@ function thermal_storage(EP::Model, inputs::Dict, setup::Dict)
 	end)
 
 	# resistive heating variables
-	vRH[y in RH, t = 1:T] >= 0 		#electrical energy from grid
-	vRHCAP[y in RH] >= 0			#RH power capacity for resource
+	@variables(EP, begin
+		vRH[y in RH, t = 1:T] >= 0 		#electrical energy from grid
+		vRHCAP[y in RH] >= 0			#RH power capacity for resource
+	end)
 
 	### THERMAL CORE CONSTRAINTS ###
 	# Core power output must be <= installed capacity, including hourly capacity factors
@@ -165,13 +168,13 @@ function thermal_storage(EP::Model, inputs::Dict, setup::Dict)
 	)
 
 	# then for resources with RH
-	@constraint(EP, cTSocBalInterior[t in INTERIOR_SUBPERIODS, y in intersect(TS, RH)], (
+	@constraint(EP, cTSocBalInteriorRH[t in INTERIOR_SUBPERIODS, y in intersect(TS, RH)], (
 		vTS[y,t] == vTS[y,t-1]
 		- (1 / dfGen[y, :Eff_Down] * EP[:vP][y,t])
 		- (1 / dfGen[y, :Eff_Down] * dfGen[y, :Start_Fuel_MMBTU_per_MW] * dfGen[y,:Cap_Size] * EP[:vSTART][y,t])
 		+ (dfGen[y,:Eff_Up] * vCP[y,t])
-		- (dfGen[y,:Self_Disch] * vTS[y,t-1]))
-		+ (vRH[y, t])  #100% resistive heating efficiency
+		- (dfGen[y,:Self_Disch] * vTS[y,t-1])
+		+ (vRH[y, t]))  #100% resistive heating efficiency
 	)
 
 	# add resistive heating to power balance
@@ -272,8 +275,8 @@ function thermal_storage(EP::Model, inputs::Dict, setup::Dict)
 
 	# use thermal core constraints for thermal cores not tagged 'FUS' 
 	if !isempty(NONFUS)
-		thermal_core_constraints(EP, inputs, setup)
-		thermal_core_max_cap_constraint(EP, inputs, setup)
+		thermal_core_constraints!(EP, inputs, setup)
+		thermal_core_max_cap_constraint!(EP, inputs, setup)
 	end
 
 	# Capacity Reserves Margin policy
@@ -292,7 +295,7 @@ function thermal_storage(EP::Model, inputs::Dict, setup::Dict)
 		EP[:eCapResMarBalance] += eCapResMarBalanceFusionAdjustment
 	end
 
-return EP
+	return EP
 end
 
 function fusion_max_cap_constraint!(EP::Model, inputs::Dict, setup::Dict)
@@ -338,7 +341,7 @@ function thermal_core_max_cap_constraint!(EP::Model, inputs::Dict, setup::Dict)
 
 	#System-wide installed capacity is less than a specified maximum limit
 	HAS_MAX_LIMIT = dfTS[by_rid(NONFUS, :Max_Core_Power_Capacity) .> 0, :R_ID]
-	@constraint(EP, cCoreMaxCapacity[y in HAS_MAX_LIMIT], vCCAP[y] <= by_rid(y, :Max_Core_Power_Capacity) / by_rid(y, :Eff_Down))
+	@constraint(EP, cCoreMaxCapacity[y in HAS_MAX_LIMIT], EP[:vCCAP][y] <= by_rid(y, :Max_Core_Power_Capacity) / by_rid(y, :Eff_Down))
 
 end
 
@@ -470,6 +473,7 @@ function thermal_core_constraints!(EP::Model, inputs::Dict, setup::Dict)
 
 	dfGen = inputs["dfGen"]
 	dfTS = inputs["dfTS"]
+	by_rid(rid, sym) = by_rid_df(rid, sym, dfTS)
 
 	T = inputs["T"]     # Number of time steps (hours)
 	Z = inputs["Z"]     # Number of zones
@@ -490,20 +494,20 @@ function thermal_core_constraints!(EP::Model, inputs::Dict, setup::Dict)
 		@constraints(EP, begin
 		
 			# ramp up, start
-			[y in NON_COMMIT, t in START_SUBPERIODS], vCP[y, t] - vCP[y, t+hours_per_subperiod-1] <= by_rid(y, :Ramp_Up_Percentage) * vCCAP[y]
+			[y in NON_COMMIT, t in START_SUBPERIODS], EP[:vCP][y, t] - EP[:vCP][y, t+hours_per_subperiod-1] <= by_rid(y, :Ramp_Up_Percentage) * EP[:vCCAP][y]
 
 			# ramp up, interior
-			[y in NON_COMMIT, t in INTERIOR_SUBPERIODS], vCP[y, t] - vCP[y, t-1] <= by_rid(y, :Ramp_Up_Percentage) * vCCAP[y]
+			[y in NON_COMMIT, t in INTERIOR_SUBPERIODS], EP[:vCP][y, t] - EP[:vCP][y, t-1] <= by_rid(y, :Ramp_Up_Percentage) * EP[:vCCAP][y]
 
 			# ramp dn, start
-			[y in NON_COMMIT, t in START_SUBPERIODS], vCP[y,t+hours_per_subperiod-1] - vCP[y,t] <= by_rid(y, :Ramp_Dn_Percentage) * vCCAP[y]
+			[y in NON_COMMIT, t in START_SUBPERIODS], EP[:vCP][y,t+hours_per_subperiod-1] - EP[:vCP][y,t] <= by_rid(y, :Ramp_Dn_Percentage) * EP[:vCCAP][y]
 
 			# ramp dn, interior
-			[y in NON_COMMIT, t in INTERIOR_SUBPERIODS], vCP[y,t-1] - vCP[y,t] <= by_rid(y, :Ramp_Dn_Percentage) * vCCAP[y]
+			[y in NON_COMMIT, t in INTERIOR_SUBPERIODS], EP[:vCP][y,t-1] - EP[:vCP][y,t] <= by_rid(y, :Ramp_Dn_Percentage) * EP[:vCCAP][y]
 		end)
 
 		# minimum stable power (assumes capacity factor of 1, so max power already implemented)
-		@constraints(EP, [y in NON_COMMIT, t=1:T], vCP[y,t] >= by_rid(y, :Min_Power)* vCCAP[y])
+		@constraint(EP, [y in NON_COMMIT, t=1:T], EP[:vCP][y,t] >= by_rid(y, :Min_Power)* EP[:vCCAP][y])
 	end
 
 	# constraints for generatiors subject to UC
@@ -525,15 +529,15 @@ function thermal_core_constraints!(EP::Model, inputs::Dict, setup::Dict)
 				set_integer.(vCCOMMIT[y,:])
 				set_integer.(vCSTART[y,:])
 				set_integer.(vCSHUT[y,:])
-				set_integer(vCCAP[y])
+				set_integer(EP[:vCCAP][y])
 			end
 		end
 
 		### Capacitated limits on unit commitment decision variables 
 		@constraints(EP, begin
-			[y in COMMIT, t=1:T], vCCOMMIT[y,t] <= vCCAP[y] / by_rid(y,:Cap_Size)
-			[y in COMMIT, t=1:T], vCSTART[y,t] <= vCCAP[y] / by_rid(y,:Cap_Size)
-			[y in COMMIT, t=1:T], vCSHUT[y,t] <= vCCAP[y] / by_rid(y,:Cap_Size)
+			[y in COMMIT, t=1:T], vCCOMMIT[y,t] <= EP[:vCCAP][y] / by_rid(y,:Cap_Size)
+			[y in COMMIT, t=1:T], vCSTART[y,t] <= EP[:vCCAP][y] / by_rid(y,:Cap_Size)
+			[y in COMMIT, t=1:T], vCSHUT[y,t] <= EP[:vCCAP][y] / by_rid(y,:Cap_Size)
 		end)
 
 		# Commitment state constraint linking startup and shutdown decisions (Constraint #4)
@@ -541,45 +545,49 @@ function thermal_core_constraints!(EP::Model, inputs::Dict, setup::Dict)
 			# For Start Hours, links first time step with last time step in subperiod
 			[y in COMMIT, t in START_SUBPERIODS], vCCOMMIT[y,t] == vCCOMMIT[y,(t+hours_per_subperiod-1)] + vCSTART[y,t] - vCSHUT[y,t]
 			# For all other hours, links commitment state in hour t with commitment state in prior hour + sum of start up and shut down in current hour
-			[y in COMMIT, t in INTERIOR_SUBPERIODS], vCCOMMIT[y,t] == vCOMMIT[y,t-1] + vCSTART[y,t] - vCSHUT[y,t]
+			[y in COMMIT, t in INTERIOR_SUBPERIODS], vCCOMMIT[y,t] == vCCOMMIT[y,t-1] + vCSTART[y,t] - vCSHUT[y,t]
 		end)
 
 		#ramp up, start
 		@constraint(EP,[y in COMMIT, t in START_SUBPERIODS],
-			vCP[y,t]-vCP[y,(t+hours_per_subperiod-1)] <= by_rid(y,:Ramp_Up_Percentage)*by_rid(y,:Cap_Size)*(vCCOMMIT[y,t]-vCSTART[y,t])
+			EP[:vCP][y,t]-EP[:vCP][y,(t+hours_per_subperiod-1)] <= by_rid(y,:Ramp_Up_Percentage)*by_rid(y,:Cap_Size)*(vCCOMMIT[y,t]-vCSTART[y,t])
 			+ min(1, max(by_rid(y,:Min_Power), by_rid(y,:Ramp_Up_Percentage)))*by_rid(y,:Cap_Size)*vCSTART[y,t]
 			- by_rid(y,:Min_Power)*by_rid(y,:Cap_Size)*vCSHUT[y,t])
 
 		#ramp up, interior
 		@constraint(EP,[y in COMMIT, t in INTERIOR_SUBPERIODS],
-			vCP[y,t]-vCP[y,(t-1)] <= by_rid(y,:Ramp_Up_Percentage)*by_rid(y,:Cap_Size)*(vCCOMMIT[y,t]-vCSTART[y,t])
+			EP[:vCP][y,t]-EP[:vCP][y,(t-1)] <= by_rid(y,:Ramp_Up_Percentage)*by_rid(y,:Cap_Size)*(vCCOMMIT[y,t]-vCSTART[y,t])
 				+ min(1,max(by_rid(y,:Min_Power), by_rid(y,:Ramp_Up_Percentage)))*by_rid(y,:Cap_Size)*vCSTART[y,t]
 				- by_rid(y,:Min_Power)*by_rid(y,:Cap_Size)*vCSHUT[y,t])
 
 		#ramp down, start
 		@constraint(EP,[y in COMMIT, t in START_SUBPERIODS],
-			vCP[y,(t+hours_per_subperiod-1)]-vCP[y,t] <= by_rid(y,:Ramp_Dn_Percentage)*by_rid(y,:Cap_Size)*(vCCOMMIT[y,t]-vCSTART[y,t])
+			EP[:vCP][y,(t+hours_per_subperiod-1)]-EP[:vCP][y,t] <= by_rid(y,:Ramp_Dn_Percentage)*by_rid(y,:Cap_Size)*(vCCOMMIT[y,t]-vCSTART[y,t])
 			- by_rid(y,:Min_Power)*by_rid(y,:Cap_Size)*vCSTART[y,t]
 			+ min(1,max(by_rid(y,:Min_Power), by_rid(y,:Ramp_Dn_Percentage)))*by_rid(y,:Cap_Size)*vCSHUT[y,t])
 
 		#ramp down, interior
 		@constraint(EP,[y in COMMIT, t in INTERIOR_SUBPERIODS],
-			vCP[y,(t-1)]-vCP[y,t] <= by_rid(y,:Ramp_Dn_Percentage)*by_rid(y,:Cap_Size)*(vCCOMMIT[y,t]-vCSTART[y,t])
+			EP[:vCP][y,(t-1)]-EP[:vCP][y,t] <= by_rid(y,:Ramp_Dn_Percentage)*by_rid(y,:Cap_Size)*(vCCOMMIT[y,t]-vCSTART[y,t])
 			- by_rid(y,:Min_Power)*by_rid(y,:Cap_Size)*vCSTART[y,t]
 			+ min(1,max(by_rid(y,:Min_Power), by_rid(y,:Ramp_Dn_Percentage)))*by_rid(y,:Cap_Size)*vCSHUT[y,t])
 
 		# minimum and maximum stable power (assumes capacity factor of 1, so max power already implemented)
 		@constraints(EP, begin
-			[y in COMMIT, t=1:T], vCP[y,t] >= by_rid(y,:Min_Power)*by_rid(y,:Cap_Size)*vCCOMMIT[y,t]
+			[y in COMMIT, t=1:T], EP[:vCP][y,t] >= by_rid(y,:Min_Power)*by_rid(y,:Cap_Size)*vCCOMMIT[y,t]
 		end)
 
 		### Minimum up and down times (Constraints #9-10)
 		p = hours_per_subperiod
+		Up_Time = zeros(Int, nrow(dfGen))
+		Up_Time[COMMIT] .= Int.(floor.(dfTS[COMMIT,:Up_Time]))
 		@constraint(EP, [y in COMMIT, t in 1:T],
-			vCCOMMIT[y,t] >= sum(vCSTART[y, hoursbefore(p, t, 0:(by_rid(y, :Up_Time) - 1))])
+			vCCOMMIT[y,t] >= sum(vCSTART[y, hoursbefore(p, t, 0:(Up_Time[y] - 1))])
 		)
+		Down_Time = zeros(Int, nrow(dfGen))
+		Down_Time[COMMIT] .= Int.(floor.(dfTS[COMMIT,:Down_Time]))
 		@constraint(EP, [y in COMMIT, t in 1:T],
-			vCCAP[y]/by_rid(y,:Cap_Size)-vCCOMMIT[y,t] >= sum(vCSHUT[y, hoursbefore(p, t, 0:(by_rid(y, :Down_Time) - 1))])
+			EP[:vCCAP][y]/by_rid(y,:Cap_Size)-vCCOMMIT[y,t] >= sum(vCSHUT[y, hoursbefore(p, t, 0:(Down_Time[y] - 1))])
 		)
 
 	end

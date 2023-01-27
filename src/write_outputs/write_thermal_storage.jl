@@ -16,13 +16,15 @@ received this license file.  If not, see <http://www.gnu.org/licenses/>.
 
 
 
-function write_core_behaviors(EP::Model, inputs::Dict, symbol::Symbol, filename::AbstractString)
+function write_core_behaviors(EP::Model, inputs::Dict, symbol::Symbol, SET::Vector{Int}, filename::AbstractString)
 	dfTS = inputs["dfTS"]
 	T = inputs["T"]
 
-	df = DataFrame(Resource = dfTS.Resource, Zone = dfTS.Zone)
-	THERMAL_STORAGE = dfTS.R_ID
-	event = value.(EP[symbol][THERMAL_STORAGE,:]).data
+	resources = by_rid_df(SET, :Resource, dfTS)
+	zones = by_rid_df(SET, :Zone, dfTS)
+
+	df = DataFrame(Resource = resources, Zone = zones)
+	event = value.(EP[symbol][SET,:]).data
 	df.Sum = vec(sum(event, dims=2))
 
 	df = hcat(df, DataFrame(event, :auto))
@@ -37,13 +39,15 @@ function write_core_behaviors(EP::Model, inputs::Dict, symbol::Symbol, filename:
 	return df
 end
 
-function write_scaled_values(EP::Model, inputs::Dict, symbol::Symbol, filename::AbstractString, msf)
+function write_scaled_values(EP::Model, inputs::Dict, symbol::Symbol, SET::Vector{Int}, filename::AbstractString, msf)
 	dfTS = inputs["dfTS"]
 	T = inputs["T"]
 
-	df = DataFrame(Resource = dfTS.Resource, Zone=dfTS.Zone)
-	THERMAL_STORAGE = dfTS.R_ID
-	quantity = value.(EP[symbol][THERMAL_STORAGE,:]).data * msf
+	resources = by_rid_df(SET, :Resource, dfTS)
+	zones = by_rid_df(SET, :Zone, dfTS)
+
+	df = DataFrame(Resource = resources, Zone=zones)
+	quantity = value.(EP[symbol][SET, :]).data * msf
 	df.AnnualSum = quantity * inputs["omega"]
 
 	df = hcat(df, DataFrame(quantity, :auto))
@@ -96,40 +100,68 @@ function write_thermal_storage(path::AbstractString, inputs::Dict, setup::Dict, 
 		corecapenergy[i] = first(value.(EP[:vTSCAP][dfTS[i,:R_ID]]))
 	end
 
+	rhcapacity = zeros(TSG)
+	for i in 1:TSG
+		if dfTS[i, :RH] == 1
+			rhcapacity[i] = first(value.(EP[:vRHCAP][dfTS[i,:R_ID]]))
+		else
+			rhcapacity[i] = 0
+		end
+	end
+
 	dfCoreCap = DataFrame(
 		Resource = TSResources, Zone = dfTS[!,:Zone],
 		CorePowerCap = corecappower[:],
-		TSEnergyCap = corecapenergy[:]
+		TSEnergyCap = corecapenergy[:],
+		RHPowerCap = rhcapacity[:]
 	)
 
 	# set a single scalar to avoid future branching
 	msf = setup["ParameterScale"] == 1 ? ModelScalingFactor : 1
-
 	dfCoreCap.CorePowerCap = dfCoreCap.CorePowerCap * msf
 	dfCoreCap.TSEnergyCap = dfCoreCap.TSEnergyCap * msf
+	dfCoreCap.RHPowerCap = dfCoreCap.RHPowerCap * msf
 	CSV.write(joinpath(path,"TS_capacity.csv"), dfCoreCap)
 
+	THERMAL_STORAGE = dfTS.R_ID
+	RH = dfTS[dfTS.RH .==1, :R_ID]
+	FUS = dfTS[dfTS.FUS .== 1, :R_ID]
+	NONFUS = dfTS[dfTS.FUS .== 0, :R_ID]
 	### CORE POWER TIME SERIES ###
-	dfCorePwr = write_scaled_values(EP, inputs, :vCP, joinpath(path, "TSCorePwr.csv"), msf)
+	dfCorePwr = write_scaled_values(EP, inputs, :vCP, THERMAL_STORAGE, joinpath(path, "TS_CorePwr.csv"), msf)
 
 	### THERMAL SOC TIME SERIES ###
-	dfTSOC = write_scaled_values(EP, inputs, :vTS, joinpath(path, "TS_SOC.csv"), msf)
+	dfTSOC = write_scaled_values(EP, inputs, :vTS, THERMAL_STORAGE, joinpath(path, "TS_SOC.csv"), msf)
 
-	### RECIRCULATING POWER TIME SERIES ###
-	dfRecirc = write_scaled_values(EP, inputs, :eTotalRecircFus, joinpath(path, "TS_Recirc.csv"), msf)
+	### RESISTIVE HEATING TIME SERIES ### 
+	if !isempty(RH)
+		dfRH = write_scaled_values(EP, inputs, :vRH, RH, joinpath(path, "TS_RH.csv"), msf)
+	end
 
-	### CORE STARTS, SHUTS, COMMITS, and MAINTENANCE TIMESERIES ###
-	dfFStart = write_core_behaviors(EP, inputs, :vFSTART, joinpath(path, "f_start.csv"))
-	dfFShut = write_core_behaviors(EP, inputs, :vFSHUT, joinpath(path, "f_shut.csv"))
-	dfFCommit = write_core_behaviors(EP, inputs, :vFCOMMIT, joinpath(path, "f_commit.csv"))
+	### FUSION SPECIFIC OUTPUTS ###
+	if !isempty(FUS)
+		### RECIRCULATING POWER TIME SERIES ###
+		dfRecirc = write_scaled_values(EP, inputs, :eTotalRecircFus, FUS, joinpath(path, "TS_Recirc.csv"), msf)
 
-	if setup["OperationWrapping"] == 0 && !isempty(get_maintenance(inputs))
-		dfMaint = write_core_behaviors(EP, inputs, :vFMDOWN, joinpath(path, "f_maint.csv"))
-		dfMShut = write_core_behaviors(EP, inputs, :vFMSHUT, joinpath(path, "f_maintshut.csv"))
+		### CORE STARTS, SHUTS, COMMITS, and MAINTENANCE TIMESERIES ###
+		dfFStart = write_core_behaviors(EP, inputs, :vFSTART, FUS, joinpath(path, "TS_FUS_start.csv"))
+		dfFShut = write_core_behaviors(EP, inputs, :vFSHUT, FUS, joinpath(path, "TS_FUS_shut.csv"))
+		dfFCommit = write_core_behaviors(EP, inputs, :vFCOMMIT, FUS, joinpath(path, "TS_FUS_commit.csv"))
+
+		if setup["OperationWrapping"] == 0 && !isempty(get_maintenance(inputs))
+			dfMaint = write_core_behaviors(EP, inputs, :vFMDOWN, FUS,  joinpath(path, "TS_FUS_maint.csv"))
+			dfMShut = write_core_behaviors(EP, inputs, :vFMSHUT, FUS, joinpath(path, "TS_FUS_maintshut.csv"))
+		end
+	end
+
+	### NON FUS CORE STARTS, SHUTS, COMMITS ###
+	if (!isempty(NONFUS) && setup["UCommit"] > 0)
+		dfNStart = write_core_behaviors(EP, inputs, :vCSTART, NONFUS, joinpath(path, "TS_NONFUS_start.csv"))
+		dfNShut = write_core_behaviors(EP, inputs, :vCSHUT, NONFUS, joinpath(path, "TS_NONFUS_shut.csv"))
+		dfNCommit = write_core_behaviors(EP, inputs, :vCCOMMIT, NONFUS, joinpath(path, "TS_NONFUS_commit.csv"))
 	end
 
 	# Write dual values of certain constraints
 	write_thermal_storage_system_max_dual(path, inputs, setup, EP)
 
-	return dfCoreCap, dfCorePwr, dfTSOC, dfFStart, dfFShut, dfFCommit
 end

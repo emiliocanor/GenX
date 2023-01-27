@@ -174,7 +174,7 @@ function thermal_storage(EP::Model, inputs::Dict, setup::Dict)
 		- (1 / dfGen[y, :Eff_Down] * dfGen[y, :Start_Fuel_MMBTU_per_MW] * dfGen[y,:Cap_Size] * EP[:vSTART][y,t])
 		+ (dfGen[y,:Eff_Up] * vCP[y,t])
 		- (dfGen[y,:Self_Disch] * vTS[y,t-1])
-		+ (vRH[y, t]))  #100% resistive heating efficiency
+		+ vRH[y, t])  #100% resistive heating efficiency
 	)
 
 	# add resistive heating to power balance

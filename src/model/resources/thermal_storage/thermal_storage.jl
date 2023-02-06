@@ -109,7 +109,9 @@ function thermal_storage(EP::Model, inputs::Dict, setup::Dict)
 	dfTS = inputs["dfTS"]
 	RH = get_resistive_heating(inputs)
 
+
 	by_rid(rid, sym) = by_rid_df(rid, sym, dfTS)
+	load_fuel_data!(inputs, setup)
 
 	@variables(EP, begin
 	# Thermal core variables
@@ -136,7 +138,7 @@ function thermal_storage(EP::Model, inputs::Dict, setup::Dict)
 
 	# Variable cost of core operation
 	# Variable cost at timestep t for thermal core y
-	@expression(EP, eCVar_Core[y in TS, t=1:T], inputs["omega"][t] * by_rid(y, :Var_OM_Cost_per_MWh_th) * vCP[y,t])
+	@expression(EP, eCVar_Core[y in TS, t=1:T], inputs["omega"][t] * (by_rid(y, :Var_OM_Cost_per_MWh_th) + inputs["TS_C_Fuel_per_MWh"][y][t]) * vCP[y,t])
 	# Variable cost from all thermal cores at timestep t)
 	@expression(EP, eTotalCVarCoreT[t=1:T], sum(eCVar_Core[y,t] for y in TS))
 	# Total variable cost for all thermal cores
@@ -295,8 +297,65 @@ function thermal_storage(EP::Model, inputs::Dict, setup::Dict)
 		EP[:eCapResMarBalance] += eCapResMarBalanceFusionAdjustment
 	end
 
+	# add emissions
+	thermal_core_emissions!(EP, inputs, setup)
+
 	return EP
 end
+
+function load_fuel_data!(inputs::Dict, setup::Dict)
+
+	dfTS = inputs["dfTS"]
+	TS = inputs["TS"]
+	NONFUS = get_nonfus(inputs)
+	N = nrow(dfTS)
+
+	# for unit commitment decisions
+	if setup["UCommit"]>=1
+		# Convert to $ million/GW with objective function in millions
+		if setup["ParameterScale"] ==1	
+			dfTS[!,:Start_Cost_per_MW] = dfTS[!,:Start_Cost_per_MW]/ModelScalingFactor 
+		end
+
+		# Fuel consumed on start-up (million BTUs per MW per start) if unit commitment is modelled
+		start_fuel = convert(Array{Float64}, collect(skipmissing(dfTS[!,:Start_Fuel_MMBTU_per_MW])))
+		# Fixed cost per start-up ($ per MW per start) if unit commitment is modelled
+		start_cost = convert(Array{Float64}, collect(skipmissing(dfTS[!,:Start_Cost_per_MW])))
+		inputs["TS_C_Start"] = Dict()
+		dfTS[!,:CO2_per_Start] = zeros(Float64, N)
+	end
+
+	# Heat rate of all resources (million BTUs/MWh)
+	heat_rate = convert(Array{Float64}, collect(skipmissing(dfTS[!,:Heat_Rate_MMBTU_per_MWh])))
+	# Fuel used by each resource
+	fuel_type = collect(skipmissing(dfTS[!,:Fuel]))
+	# Maximum fuel cost in $ per MWh and CO2 emissions in tons per MWh
+	inputs["TS_C_Fuel_per_MWh"] = Dict()
+	dfTS[!,:CO2_per_MWh] = zeros(Float64,N)
+
+	for g in 1:N 
+		#calculate fuel costs
+		inputs["TS_C_Fuel_per_MWh"][dfTS[g, :R_ID]] = inputs["fuel_costs"][fuel_type[g]] .* heat_rate[g]
+		#calculate fuel emissions
+		dfTS[g, :CO2_per_MWh] = inputs["fuel_CO2"][fuel_type[g]] .* heat_rate[g]
+		if setup["ParameterScale"] ==1
+			dfTS[g,:CO2_per_MWh] = dfTS[g,:CO2_per_MWh] * ModelScalingFactor
+		end
+
+		# add start up costs and emissions for committed thermal cores.
+		if dfTS[g, :R_ID] in intersect(inputs["THERM_COMMIT"])
+			inputs["TS_C_Start"][dfTS[g, :R_ID]] = by_rid_df(g, :Cap_Size, dfTS) .* (inputs["fuel_costs"][fuel_type[g]] .* start_fuel[g] .+ start_cost[g])
+
+			dfTS[g, :CO2_per_Start] = by_rid_df(g, :Cap_Size, dfTS) * (inputs["fuel_CO2"][fuel_type[g]] * start_fuel[g])
+
+			#scale appropriately
+			if setup["ParameterScale"] == 1
+				dfTS[g, :CO2_per_Start] = dfTS[g, :CO2_per_Start] * ModelScalingFactor
+			end
+		end
+	end
+end
+
 
 function fusion_max_cap_constraint!(EP::Model, inputs::Dict, setup::Dict)
 
@@ -485,7 +544,7 @@ function thermal_core_constraints!(EP::Model, inputs::Dict, setup::Dict)
 	INTERIOR_SUBPERIODS = inputs["INTERIOR_SUBPERIODS"]
 
 	COMMIT = intersect(inputs["THERM_COMMIT"], NONFUS)
-	NON_COMMIT = intersect(inputs["THERM_NO_COMMIT"])
+	NON_COMMIT = intersect(inputs["THERM_NO_COMMIT"], NONFUS)
 
 	# constraints for generators not subject to UC
 	if !isempty(NON_COMMIT)
@@ -521,7 +580,11 @@ function thermal_core_constraints!(EP::Model, inputs::Dict, setup::Dict)
 		# shutdown event variable
 		@variable(EP, vCSHUT[y in COMMIT, t=1:T] >= 0)
 
-		### TODO: STARTUP COSTS ???????? ###
+		### Add startup costs ###
+		@expression(EP, eCStartTS[y in COMMIT, t=1:T], (inputs["omega"][t] * inputs["TS_C_Start"][y][t] * vCSTART[y, t]))
+		@expression(EP, eTotalCStartTST[t=1:T], sum(eCStartTS[y,t] for y in COMMIT))
+		@expression(EP, eTotalCStartTS, sum(eTotalCStartTST[t] for t=1:T))
+		EP[:eObj] += eTotalCStartTS
 
 		## Declaration of integer/binary variables
 		if setup["UCommit"] == 1 # Integer UC constraints
@@ -653,6 +716,39 @@ function maintenance_constraints!(EP::Model, inputs::Dict, setup::Dict)
 	# Passive recirculating power, depending on built capacity
 	@expression(EP, ePassiveRecircFus[y in FUS, t=1:T],
 		(EP[:vCCAP][y] - by_rid(y,:Cap_Size) * EP[:vFMDOWN][y,t]) * dfGen[y,:Eff_Down] * by_rid(y,:Recirc_Pass))
+end
+
+function thermal_core_emissions!(EP::Model, inputs::Dict, setup::Dict)
+
+	dfTS = inputs["dfTS"]
+	dfGen = inputs["dfGen"]
+
+	TS = inputs["TS"]	# R_IDs of resources with thermal storage
+	G = inputs["G"]		# R_IDs of all resources
+	T = inputs["T"]     # Number of time steps (hours)
+	Z = inputs["Z"]     # Number of zones
+	FUS = get_fus(inputs) #FUS generators
+	NONFUS = get_nonfus(inputs)	#NONFUS generators
+	by_rid(rid, sym) = by_rid_df(rid, sym, dfTS)
+	
+	@expression(EP, eEmissionsByPlantTS[y = 1:G, t = 1:T],
+
+		if y ∉ TS
+			0
+		elseif y in FUS
+			by_rid(y, :CO2_per_MWh) * EP[:vCP][y, t] + by_rid(y, :CO2_per_Start) * EP[:vFSTART][y, t]
+		elseif y in intersect(NONFUS, inputs["THERM_COMMIT"])
+			by_rid(y, :CO2_per_MWh) * EP[:vCP][y, t] + by_rid(y, :CO2_per_Start) * EP[:vCSTART][y, t]
+		else
+			by_rid(y, :CO2_per_MWh) * EP[:vCP][y,t]
+		end
+	)
+
+	@expression(EP, eEmissionsByZoneTS[z=1:Z, t=1:T], sum(eEmissionsByPlantTS[y,t] for y in intersect(TS, dfGen[(dfGen[!,:Zone].==z),:R_ID])))
+
+	EP[:eEmissionsByPlant] += eEmissionsByPlantTS
+	EP[:eEmissionsByZone] += eEmissionsByZoneTS
+
 end
 
 

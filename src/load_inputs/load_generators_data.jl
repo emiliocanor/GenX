@@ -26,7 +26,7 @@ function check_thermal_storage_validity(df::DataFrame)
 
 	c = ts .& .!is_nonzero(df, :THERM)
 	if any(c)
-		e = string("Generators ", r_id[c], ", marked as TS, do not also have THERM=1")
+		e = string("Generators ", r_id[c], ", marked as TS, do not also have THERM != 0")
 		push!(error_strings, e)
 	end
 
@@ -335,7 +335,8 @@ function load_thermal_storage_data!(setup::Dict, path::AbstractString, inputs_ge
 								:Max_Cap_MW_th,
 								:Fixed_Cost_per_MW_th,
 								:Var_OM_Cost_per_MWh_th,
-								:Fixed_Cost_per_MWh_th]
+								:Fixed_Cost_per_MWh_th,
+								:Fixed_Cost_per_MW_RH]
 			ts_in[!, columns_to_scale] ./= ModelScalingFactor
 		end
 		inputs_gen["dfTS"] = ts_in

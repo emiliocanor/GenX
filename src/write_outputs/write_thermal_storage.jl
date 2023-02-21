@@ -131,7 +131,7 @@ function write_thermal_storage_capacity_duals(EP::Model, inputs::Dict, setup::Di
 	NONFUS = get_nonfus(inputs)
 
 	if !isempty(NONFUS)
-		HAS_MAX_LIMIT = dfTS[dfTS.Max_Core_Power_Capacity_MWe .> 0, :R_ID]
+		HAS_MAX_LIMIT = dfTS[dfTS.Max_Core_Power_Capacity_MWe .>= 0, :R_ID]
 		HAS_MAX_LIMIT = intersect(HAS_MAX_LIMIT, NONFUS)
 		resources = by_rid_df(HAS_MAX_LIMIT, :Resource, dfTS)
 		n_max = length(HAS_MAX_LIMIT)
@@ -146,6 +146,26 @@ function write_thermal_storage_capacity_duals(EP::Model, inputs::Dict, setup::Di
 		)
 		CSV.write(filename, dftranspose(df, false), writeheader=false)
 	end
+end
+function write_costs(EP::Model, filename::AbstractString, scale_factor)
+	
+	start_core_costs = value.(EP[:eTotalCStartTS]) * scale_factor^2
+	var_core_costs = value.(EP[:eTotalCVarCore]) * scale_factor^2
+	fix_core_costs = value.(EP[:eTotalCFixedCore]) * scale_factor^2
+	fix_TS_costs = value.(EP[:eTotalCFixedTS]) * scale_factor^2
+	fix_RH_costs = value.(EP[:eTotalCFixedRH]) * scale_factor^2
+	total_costs = start_core_costs + var_core_costs + fix_core_costs + fix_TS_costs + fix_RH_costs
+
+	df = DataFrame(
+		cTotalTS = total_costs,
+		cStartCore = start_core_costs,
+		cVarCore = var_core_costs,
+		cFixCore = fix_core_costs,
+		cFixTS = fix_TS_costs,
+		cFixRH = fix_RH_costs
+	)
+
+	CSV.write(filename, dftranspose(df, false), writeheader=false)
 end
 
 @doc raw"""
@@ -207,5 +227,8 @@ function write_thermal_storage(path::AbstractString, inputs::Dict, setup::Dict, 
 	# Write dual values of certain constraints
 	write_thermal_storage_system_max_dual(EP, inputs, setup, joinpath(path, "TS_System_Max_Cap_dual.csv"), scale_factor)
 	write_thermal_storage_capacity_duals(EP, inputs, setup, joinpath(path, "TS_Capacity_Duals.csv"), scale_factor)
+
+	#write costs
+	write_costs(EP, joinpath(path, "TS_costs.csv"), scale_factor)
 
 end

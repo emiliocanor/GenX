@@ -337,7 +337,11 @@ function load_thermal_storage_data!(setup::Dict, path::AbstractString, inputs_ge
 								:Var_OM_Cost_per_MWh_th,
 								:Fixed_Cost_per_MWh_th,
 								:Fixed_Cost_per_MW_RH]
-			ts_in[!, columns_to_scale] ./= ModelScalingFactor
+			for column in columns_to_scale
+				if column in names(ts_in)
+					ts_in[!, column] ./= ModelScalingFactor
+				end
+			end
 		end
 		inputs_gen["dfTS"] = ts_in
 		println("Thermal_storage.csv Successfully Read!")

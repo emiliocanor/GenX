@@ -250,10 +250,10 @@ function thermal_storage(EP::Model, inputs::Dict, setup::Dict)
 
 	# Parameter Fixing Constraints
 	# Fixed ratio of gross generator capacity to core equivalent gross electric power
-	@constraint(EP, cCPRatMax[y in dfTS[dfTS.Max_Generator_Core_Power_Ratio.>0,:R_ID]],
+	@constraint(EP, cCPRatMax[y in dfTS[dfTS.Max_Generator_Core_Power_Ratio.>=0,:R_ID]],
 				vCCAP[y] * dfGen[y,:Eff_Down] * by_rid(y,:Max_Generator_Core_Power_Ratio) >=
 				EP[:vCAP][y] * dfGen[y,:Cap_Size])
-	@constraint(EP, cCPRatMin[y in dfTS[dfTS.Min_Generator_Core_Power_Ratio.>0,:R_ID]],
+	@constraint(EP, cCPRatMin[y in dfTS[dfTS.Min_Generator_Core_Power_Ratio.>=0,:R_ID]],
 				vCCAP[y] * dfGen[y,:Eff_Down] * by_rid(y,:Min_Generator_Core_Power_Ratio) <=
 				EP[:vCAP][y] * dfGen[y,:Cap_Size])
 	# Limits on storage duration
@@ -395,9 +395,9 @@ function thermal_core_max_cap_constraint!(EP::Model, inputs::Dict)
 
 	NONFUS = get_nonfus(inputs)
 
-	#System-wide installed capacity is less than a specified maximum limit
+	#set upper capacity limit on generators where specified.
 	HAS_MAX_LIMIT = dfTS[dfTS.Max_Core_Power_Capacity_MWe .>= 0, :R_ID]
-	HAS_MAX_LIMIT = intersect(HAS_MAX_LIMIT, NONFUS)
+	intersect!(HAS_MAX_LIMIT, NONFUS)
 	@constraint(EP, cCoreMaxCapacity[y in HAS_MAX_LIMIT], EP[:vCCAP][y] <= by_rid(y, :Max_Core_Power_Capacity_MWe) / by_rid(y, :Eff_Down))
 
 end
@@ -480,7 +480,7 @@ function fusion_constraints!(EP::Model, inputs::Dict, setup::Dict)
 		by_rid(y, :Max_Starts) * EP[:vCCAP][y] / by_rid(y,:Cap_Size)
 	)
 
-	MAX_UPTIME = intersect(FUS, dfTS[dfTS.Max_Up.>0, :R_ID])
+	MAX_UPTIME = intersect(FUS, dfTS[dfTS.Max_Up.>=0, :R_ID])
 	# TODO: throw error if Max_Up == 0 since it's confusing & illdefined
 
 	max_uptime = zeros(Int, G)

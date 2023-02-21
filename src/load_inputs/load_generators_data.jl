@@ -330,16 +330,16 @@ function load_thermal_storage_data!(setup::Dict, path::AbstractString, inputs_ge
 		ts_in = DataFrame(CSV.File(joinpath(path,"Thermal_storage.csv"), header=true), copycols=true)
 
 		if setup["ParameterScale"] == 1
-			columns_to_scale = [:System_Max_Cap_MWe_net,
-								:Cap_Size,
-								:Max_Cap_MW_th,
-								:Fixed_Cost_per_MW_th,
-								:Var_OM_Cost_per_MWh_th,
-								:Fixed_Cost_per_MWh_th,
-								:Fixed_Cost_per_MW_RH]
+			columns_to_scale = ["System_Max_Cap_MWe_net",
+								"Cap_Size",
+								"Max_Cap_MW_th",
+								"Fixed_Cost_per_MW_th",
+								"Var_OM_Cost_per_MWh_th",
+								"Fixed_Cost_per_MWh_th",
+								"Fixed_Cost_per_MW_RH"]
 			for column in columns_to_scale
 				if column in names(ts_in)
-					ts_in[!, column] ./= ModelScalingFactor
+					ts_in[!, Symbol(column)] ./= ModelScalingFactor
 				end
 			end
 		end

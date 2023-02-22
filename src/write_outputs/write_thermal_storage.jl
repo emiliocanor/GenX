@@ -131,13 +131,13 @@ function write_thermal_storage_capacity_duals(EP::Model, inputs::Dict, setup::Di
 	NONFUS = get_nonfus(inputs)
 
 	if !isempty(NONFUS)
-		HAS_MAX_LIMIT = dfTS[dfTS.Max_Core_Power_Capacity_MWe .>= 0, :R_ID]
-		HAS_MAX_LIMIT = intersect(HAS_MAX_LIMIT, NONFUS)
+		HAS_MAX_LIMIT = dfTS[dfTS.Max_Cap_MW_th .>= 0, :R_ID]
+		intersect!(HAS_MAX_LIMIT, NONFUS)
 		resources = by_rid_df(HAS_MAX_LIMIT, :Resource, dfTS)
 		n_max = length(HAS_MAX_LIMIT)
 		vals = zeros(n_max)
 		for i in 1:n_max
-			vals[i] = -1 * dual.(EP[:cCoreMaxCapacity][HAS_MAX_LIMIT[i]]) * scale_factor
+			vals[i] = -1 * dual.(EP[:cCCAPMax][HAS_MAX_LIMIT[i]]) * scale_factor
 		end
 		df = DataFrame(
 			Resource = resources,

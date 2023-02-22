@@ -274,7 +274,7 @@ function thermal_storage(EP::Model, inputs::Dict, setup::Dict)
 	# use thermal core constraints for thermal cores not tagged 'FUS' 
 	if !isempty(NONFUS)
 		thermal_core_constraints!(EP, inputs, setup)
-		thermal_core_max_cap_constraint!(EP, inputs)
+		# thermal_core_max_cap_constraint!(EP, inputs)
 	end
 
 	# Capacity Reserves Margin policy
@@ -386,21 +386,21 @@ function fusion_max_cap_constraint!(EP::Model, inputs::Dict, setup::Dict)
 	end
 end
 
-# set maximum power capacity constraint for the thermal core (in MWth)
-function thermal_core_max_cap_constraint!(EP::Model, inputs::Dict)
+# # set maximum power capacity constraint for the thermal core (in MWth)
+# function thermal_core_max_cap_constraint!(EP::Model, inputs::Dict)
 
-	dfTS = inputs["dfTS"]
-	TS = inputs["TS"]
-	by_rid(rid, sym) = by_rid_df(rid, sym, dfTS)
+# 	dfTS = inputs["dfTS"]
+# 	TS = inputs["TS"]
+# 	by_rid(rid, sym) = by_rid_df(rid, sym, dfTS)
 
-	NONFUS = get_nonfus(inputs)
+# 	NONFUS = get_nonfus(inputs)
 
-	#set upper capacity limit on generators where specified.
-	HAS_MAX_LIMIT = dfTS[dfTS.Max_Core_Power_Capacity_MWe .>= 0, :R_ID]
-	intersect!(HAS_MAX_LIMIT, NONFUS)
-	@constraint(EP, cCoreMaxCapacity[y in HAS_MAX_LIMIT], EP[:vCCAP][y] <= by_rid(y, :Max_Core_Power_Capacity_MWe) / by_rid(y, :Eff_Down))
+# 	#set upper capacity limit on generators where specified.
+# 	HAS_MAX_LIMIT = dfTS[dfTS.Max_Cap_MW_th .>= 0, :R_ID]
+# 	intersect!(HAS_MAX_LIMIT, NONFUS)
+# 	@constraint(EP, cCoreMaxCapacity[y in HAS_MAX_LIMIT], EP[:vCCAP][y] <= by_rid(y, :Max_Cap_MW_th) / by_rid(y, :Eff_Down))
 
-end
+# end
 
 
 @doc raw"""

@@ -183,7 +183,7 @@ function thermal_storage(EP::Model, inputs::Dict, setup::Dict)
 	EP[:ePowerBalance] += ePowerBalanceRH
 
 	# add capacity constraint for RH
-	@constraint(EP, cRHMax[t = 1:T, y in RH], 
+	@constraint(EP, cRHMax[t = 1:T, y in RH],
 		vRH[y, t] <= vRHCAP[y]
 	)
 
@@ -271,7 +271,7 @@ function thermal_storage(EP::Model, inputs::Dict, setup::Dict)
 	### NONFUSION CONSTRAINTS ###
 	NONFUS = get_nonfus(inputs)
 
-	# use thermal core constraints for thermal cores not tagged 'FUS' 
+	# use thermal core constraints for thermal cores not tagged 'FUS'
 	if !isempty(NONFUS)
 		thermal_core_constraints!(EP, inputs, setup)
 		# thermal_core_max_cap_constraint!(EP, inputs)
@@ -311,8 +311,8 @@ function load_thermal_storage_fuel_data!(inputs::Dict, setup::Dict)
 	# for unit commitment decisions
 	if setup["UCommit"]>=1
 		# Convert to $ million/GW with objective function in millions
-		dfTS[!,:Start_Cost_per_MW] /= scale_factor 
-		
+		dfTS[!,:Start_Cost_per_MW] /= scale_factor
+
 
 		# Fuel consumed on start-up (million BTUs per MW per start) if unit commitment is modelled
 		start_fuel = convert(Array{Float64}, dfTS[!,:Start_Fuel_MMBTU_per_MW])
@@ -330,13 +330,13 @@ function load_thermal_storage_fuel_data!(inputs::Dict, setup::Dict)
 	inputs["TS_C_Fuel_per_MWh"] = Dict()
 	dfTS[!,:CO2_per_MWh] = zeros(Float64, TSG)
 
-	for gen_id in 1:TSG 
+	for gen_id in 1:TSG
 		#calculate fuel costs
 		inputs["TS_C_Fuel_per_MWh"][dfTS[gen_id, :R_ID]] = inputs["fuel_costs"][fuel_type[gen_id]] .* heat_rate[gen_id]
 		#calculate fuel emissions
 		dfTS[gen_id, :CO2_per_MWh] = inputs["fuel_CO2"][fuel_type[gen_id]] .* heat_rate[gen_id]
 		dfTS[gen_id,:CO2_per_MWh] *= scale_factor
-		
+
 
 		# add start up costs and emissions for committed thermal cores.
 		if dfTS[gen_id, :R_ID] in THERM_COMMIT
@@ -544,10 +544,10 @@ function thermal_core_constraints!(EP::Model, inputs::Dict, setup::Dict)
 
 	# constraints for generators not subject to UC
 	if !isempty(NON_COMMIT)
-		
+
 		# ramp up and ramp down rates
 		@constraints(EP, begin
-		
+
 			# ramp up
 			[y in NON_COMMIT, t in T], EP[:vCP][y, t] - EP[:vCP][y, hoursbefore(p, t, 1)] <= by_rid(y, :Ramp_Up_Percentage) * EP[:vCCAP][y]
 
@@ -575,7 +575,7 @@ function thermal_core_constraints!(EP::Model, inputs::Dict, setup::Dict)
 		@expression(EP, eTotalCStartTST[t=1:T], sum(eCStartTS[y,t] for y in COMMIT))
 		@expression(EP, eTotalCStartTS, sum(eTotalCStartTST[t] for t=1:T))
 		EP[:eObj] += eTotalCStartTS
-	
+
 		## Declaration of integer/binary variables
 		if setup["UCommit"] == 1 # Integer UC constraints
 			for y in COMMIT
@@ -586,7 +586,7 @@ function thermal_core_constraints!(EP::Model, inputs::Dict, setup::Dict)
 			end
 		end
 
-		### Capacitated limits on unit commitment decision variables 
+		### Capacitated limits on unit commitment decision variables
 		@constraints(EP, begin
 			[y in COMMIT, t=1:T], vCCOMMIT[y,t] <= EP[:vCCAP][y] / by_rid(y,:Cap_Size)
 			[y in COMMIT, t=1:T], vCSTART[y,t] <= EP[:vCCAP][y] / by_rid(y,:Cap_Size)
@@ -625,7 +625,7 @@ function thermal_core_constraints!(EP::Model, inputs::Dict, setup::Dict)
 		@constraint(EP, [y in COMMIT, t in 1:T],
 			vCCOMMIT[y,t] >= sum(vCSTART[y, hoursbefore(p, t, 0:(Up_Time[y] - 1))])
 		)
-		
+
 		Down_Time = zeros(Int, nrow(dfGen))
 		Down_Time[COMMIT] .= Int.(floor.(dfTS[COMMIT,:Down_Time]))
 		@constraint(EP, [y in COMMIT, t in 1:T],
@@ -710,7 +710,7 @@ function thermal_core_emissions!(EP::Model, inputs::Dict, setup::Dict)
 	NONFUS = get_nonfus(inputs)	#NONFUS generators
 	THERM_COMMIT = inputs["THERM_COMMIT"] # units subject to UC
 	by_rid(rid, sym) = by_rid_df(rid, sym, dfTS)
-	
+
 	@expression(EP, eEmissionsByPlantTS[y = 1:G, t = 1:T],
 
 		if y ∉ TS

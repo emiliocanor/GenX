@@ -179,7 +179,7 @@ function thermal_storage(EP::Model, inputs::Dict, setup::Dict)
 
 	# add resistive heating to power balance
 	@expression(EP, ePowerBalanceRH[t=1:T, z=1:Z],
-		-1 * sum(vRH[y, t] for y in intersect(RH, dfGen[dfGen[!, :Zone].==z, :R_ID])))
+		- sum(vRH[y, t] for y in intersect(RH, dfGen[dfGen[!, :Zone].==z, :R_ID])))
 	EP[:ePowerBalance] += ePowerBalanceRH
 
 	# add capacity constraint for RH
@@ -274,7 +274,6 @@ function thermal_storage(EP::Model, inputs::Dict, setup::Dict)
 	# use thermal core constraints for thermal cores not tagged 'FUS'
 	if !isempty(NONFUS)
 		thermal_core_constraints!(EP, inputs, setup)
-		# thermal_core_max_cap_constraint!(EP, inputs)
 	end
 
 	# Capacity Reserves Margin policy
@@ -385,23 +384,6 @@ function fusion_max_cap_constraint!(EP::Model, inputs::Dict, setup::Dict)
 		@constraint(EP, cCSystemTot, sum(eCAvgNetElectric[FUS]) <= system_max_cap_mwe_net)
 	end
 end
-
-# # set maximum power capacity constraint for the thermal core (in MWth)
-# function thermal_core_max_cap_constraint!(EP::Model, inputs::Dict)
-
-# 	dfTS = inputs["dfTS"]
-# 	TS = inputs["TS"]
-# 	by_rid(rid, sym) = by_rid_df(rid, sym, dfTS)
-
-# 	NONFUS = get_nonfus(inputs)
-
-# 	#set upper capacity limit on generators where specified.
-# 	HAS_MAX_LIMIT = dfTS[dfTS.Max_Cap_MW_th .>= 0, :R_ID]
-# 	intersect!(HAS_MAX_LIMIT, NONFUS)
-# 	@constraint(EP, cCoreMaxCapacity[y in HAS_MAX_LIMIT], EP[:vCCAP][y] <= by_rid(y, :Max_Cap_MW_th) / by_rid(y, :Eff_Down))
-
-# end
-
 
 @doc raw"""
     fusion_constraints!(EP::Model, inputs::Dict)
@@ -547,11 +529,7 @@ function thermal_core_constraints!(EP::Model, inputs::Dict, setup::Dict)
 
 		# ramp up and ramp down rates
 		@constraints(EP, begin
-
-			# ramp up
 			[y in NON_COMMIT, t in T], EP[:vCP][y, t] - EP[:vCP][y, hoursbefore(p, t, 1)] <= by_rid(y, :Ramp_Up_Percentage) * EP[:vCCAP][y]
-
-			# ramp dn
 			[y in NON_COMMIT, t in T], EP[:vCP][y, hoursbefore(p, t, 1)] - EP[:vCP][y,t] <= by_rid(y, :Ramp_Dn_Percentage) * EP[:vCCAP][y]
 		end)
 
@@ -712,7 +690,6 @@ function thermal_core_emissions!(EP::Model, inputs::Dict, setup::Dict)
 	by_rid(rid, sym) = by_rid_df(rid, sym, dfTS)
 
 	@expression(EP, eEmissionsByPlantTS[y = 1:G, t = 1:T],
-
 		if y ∉ TS
 			0
 		elseif y in intersect(THERM_COMMIT, NONFUS)
@@ -723,10 +700,8 @@ function thermal_core_emissions!(EP::Model, inputs::Dict, setup::Dict)
 	)
 
 	@expression(EP, eEmissionsByZoneTS[z=1:Z, t=1:T], sum(eEmissionsByPlantTS[y,t] for y in intersect(TS, dfGen[(dfGen[!,:Zone].==z),:R_ID])))
-
-	EP[:eEmissionsByPlant] += eEmissionsByPlantTS
-	EP[:eEmissionsByZone] += eEmissionsByZoneTS
-
+		EP[:eEmissionsByPlant] += eEmissionsByPlantTS
+		EP[:eEmissionsByZone] += eEmissionsByZoneTS
 end
 
 

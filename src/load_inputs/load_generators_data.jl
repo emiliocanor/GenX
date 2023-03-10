@@ -331,6 +331,7 @@ function load_thermal_storage_data!(setup::Dict, path::AbstractString, inputs_ge
 
 		if setup["ParameterScale"] == 1
 			columns_to_scale = ["System_Max_Cap_MWe_net",
+								"Nonfus_System_Max_Cap_MWe",
 								"Cap_Size",
 								"Max_Cap_MW_th",
 								"Fixed_Cost_per_MW_th",

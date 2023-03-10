@@ -352,6 +352,29 @@ function load_thermal_storage_fuel_data!(inputs::Dict, setup::Dict)
 	end
 end
 
+function nonfus_max_cap_constraint!(EP::Model, inputs::Dict, setup::Dict)
+
+	dfGen = inputs["dfGen"]
+
+	G = inputs["G"]     # Number of resources (generators, storage, DR, and DERs)
+	TS = inputs["TS"]
+
+	dfTS = inputs["dfTS"]
+	by_rid(rid, sym) = by_rid_df(rid, sym, dfTS)
+
+	# convert thermal capacities to electrical capacities
+	NONFUS =  get_nonfus(inputs)
+	@expression(EP, eCElectric[y in NONFUS], EP[:vCCAP][y] * by_rid_df(y, :Eff_Down, dfGen))
+
+	#System-wide installed capacity is less than a specified maximum limit
+	FIRST_ROW = 1
+	if "Nonfus_System_Max_Cap_MWe" in names(dfTS)
+		max_cap = dfTS[FIRST_ROW, :Nonfus_System_Max_Cap_MWe]
+		if max_cap >= 0
+			@constraint(EP, cNonfusSystemTot, sum(eCElectric[NONFUS]) <= max_cap)
+		end
+	end
+end
 
 function fusion_max_cap_constraint!(EP::Model, inputs::Dict, setup::Dict)
 
@@ -612,6 +635,8 @@ function thermal_core_constraints!(EP::Model, inputs::Dict, setup::Dict)
 		@constraint(EP, [y in COMMIT, t in 1:T],
 			EP[:vCCAP][y]/by_rid(y,:Cap_Size)-vCCOMMIT[y,t] >= sum(vCSHUT[y, hoursbefore(p, t, 0:(Down_Time[y] - 1))])
 		)
+
+		nonfus_max_cap_constraint!(EP, inputs, setup)
 
 	end
 end

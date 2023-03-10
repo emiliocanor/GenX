@@ -113,7 +113,9 @@ end
 function write_thermal_storage_system_max_dual(EP::Model, inputs::Dict, setup::Dict, filename::AbstractString, scale_factor)
 	dfTS = inputs["dfTS"]
 	FUS = dfTS[dfTS.FUS .== 1, :R_ID]
+	NONFUS = get_nonfus(inputs)
 
+	#fusion limit
 	if !isempty(FUS)
 		FIRST_ROW = 1
 		if dfTS[FIRST_ROW, :System_Max_Cap_MWe_net] >= 0
@@ -122,7 +124,20 @@ function write_thermal_storage_system_max_dual(EP::Model, inputs::Dict, setup::D
 			df = DataFrame(:System_Max_Cap_MW_th_dual => val)
 			CSV.write(filename, dftranspose(df, false), writeheader=false)
 		end
-	end	
+	end
+
+	#non fusion limit
+	if !isempty(NONFUS)
+		FIRST_ROW = 1
+		if "Nonfus_System_Max_Cap_MWe" in names(dfTS)
+			if dfTS[FIRST_ROW, :Nonfus_System_Max_Cap_MWe] >= 0
+				val = -1*dual.(EP[:cNonfusSystemTot])
+				val *= scale_factor
+				df = DataFrame(:Nonfus_System_Max_Cap_MWe => val)
+				CSV.write(filename, dftranspose(df, false), writeheader=false)
+			end
+		end
+	end
 end
 
 function write_thermal_storage_capacity_duals(EP::Model, inputs::Dict, setup::Dict, filename::AbstractString, scale_factor)

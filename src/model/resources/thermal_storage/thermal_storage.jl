@@ -286,12 +286,14 @@ function thermal_storage(EP::Model, inputs::Dict, setup::Dict)
 		@expression(EP, eCapResMarBalanceThermalStorageAdjustment[res=1:ncap, t=1:T],
 					sum(dfGen[y,Symbol("CapRes_$res")] * (EP[:vP][y,t] - EP[:eTotalCap][y]) for y in TS))
 
+		EP[:eCapResMarBalance] += eCapResMarBalanceThermalStorageAdjustment
+		
 		@expression(EP, eCapResMarBalanceFusionAdjustment[res=1:ncap, t=1:T],
-					sum(dfGen[y,Symbol("CapRes_$res")] * (-by_rid(y, :Cap_Size)*EP[:vFSTART][y,t]*dfGen[y,:Eff_Down]*by_rid(y, :Start_Power)
+					sum(dfGen[y, Symbol("CapRes_$res")] * (-by_rid(y, :Cap_Size)*EP[:vFSTART][y,t]*dfGen[y,:Eff_Down]*by_rid(y, :Start_Power)
 															- EP[:ePassiveRecircFus][y,t]
 															- EP[:eActiveRecircFus][y,t]) for y in FUS))
 
-		EP[:eCapResMarBalance] += eCapResMarBalanceThermalStorageAdjustment
+
 		EP[:eCapResMarBalance] += eCapResMarBalanceFusionAdjustment
 	end
 
@@ -342,9 +344,9 @@ function load_thermal_storage_fuel_data!(inputs::Dict, setup::Dict)
 
 		# add start up costs and emissions for committed thermal cores.
 		if dfTS[gen_id, :R_ID] in THERM_COMMIT
-			inputs["TS_C_Start"][dfTS[gen_id, :R_ID]] = by_rid_df(gen_id, :Cap_Size, dfTS) .* (inputs["fuel_costs"][fuel_type[gen_id]] .* start_fuel[gen_id] .+ start_cost[gen_id])
+			inputs["TS_C_Start"][dfTS[gen_id, :R_ID]] = dfTS[gen_id, :Cap_Size] .* (inputs["fuel_costs"][fuel_type[gen_id]] .* start_fuel[gen_id] .+ start_cost[gen_id])
 
-			dfTS[gen_id, :CO2_per_Start] = by_rid_df(gen_id, :Cap_Size, dfTS) * (inputs["fuel_CO2"][fuel_type[gen_id]] * start_fuel[gen_id])
+			dfTS[gen_id, :CO2_per_Start] = dfTS[gen_id, :Cap_Size] * (inputs["fuel_CO2"][fuel_type[gen_id]] * start_fuel[gen_id])
 
 			#scale appropriately
 			dfTS[gen_id, :CO2_per_Start] *= scale_factor

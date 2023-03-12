@@ -625,13 +625,13 @@ function thermal_core_constraints!(EP::Model, inputs::Dict, setup::Dict)
 
 		### Minimum up and down times (Constraints #9-10)
 		Up_Time = zeros(Int, nrow(dfGen))
-		Up_Time[COMMIT] .= Int.(floor.(dfTS[COMMIT,:Up_Time]))
+		Up_Time[COMMIT] .= Int.(floor.(by_rid_df(COMMIT,:Up_Time,dfTS)))
 		@constraint(EP, [y in COMMIT, t in 1:T],
 			vCCOMMIT[y,t] >= sum(vCSTART[y, hoursbefore(p, t, 0:(Up_Time[y] - 1))])
 		)
 
 		Down_Time = zeros(Int, nrow(dfGen))
-		Down_Time[COMMIT] .= Int.(floor.(dfTS[COMMIT,:Down_Time]))
+		Down_Time[COMMIT] .= Int.(floor.(by_rid_df(COMMIT,:Down_Time,dfTS)))
 		@constraint(EP, [y in COMMIT, t in 1:T],
 			EP[:vCCAP][y]/by_rid(y,:Cap_Size)-vCCOMMIT[y,t] >= sum(vCSHUT[y, hoursbefore(p, t, 0:(Down_Time[y] - 1))])
 		)
